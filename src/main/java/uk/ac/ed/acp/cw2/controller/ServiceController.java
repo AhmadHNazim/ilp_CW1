@@ -6,6 +6,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.ResponseEntity;
+
+import uk.ac.ed.acp.cw2.dto.DistanceRequest;
 
 import java.net.URL;
 import java.time.Instant;
@@ -35,7 +38,19 @@ public class ServiceController {
 
     @GetMapping("/uid")
     public String uid() {
-        return "s12345678";
+        return "s2556257";
+    }
+
+    @PostMapping("/distanceTo")
+    public ResponseEntity<Double> calculateDistance(@RequestBody DistanceRequest request) {
+        try {
+            double dx = request.getPosition1().getLng() - request.getPosition2().getLng();
+            double dy = request.getPosition1().getLat() - request.getPosition2().getLat();
+            double distance = Math.sqrt(dx * dx + dy * dy);
+            return ResponseEntity.ok(distance);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
     }
 
 }
