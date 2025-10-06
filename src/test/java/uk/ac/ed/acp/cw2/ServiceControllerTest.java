@@ -10,6 +10,7 @@ import uk.ac.ed.acp.cw2.controller.ServiceController;
 import uk.ac.ed.acp.cw2.dto.DistanceRequest;
 import uk.ac.ed.acp.cw2.dto.Position;
 
+import static org.hamcrest.Matchers.closeTo;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -119,6 +120,33 @@ public class ServiceControllerTest {
         mockMvc.perform(post("/api/v1/isCloseTo")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalidJson))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    public void testNextPosition_Valid() throws Exception {
+        String json = """
+        {
+            "start": {"lng": -3.192473, "lat": 55.946233},
+            "angle": 90
+        }
+    """;
+
+        mockMvc.perform(post("/api/v1/nextPosition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lng").value(-3.192473))
+                .andExpect(jsonPath("$.lat").value(closeTo(55.946233 + 0.00015, 1e-7)));
+    }
+
+    @Test
+    public void testNextPosition_InvalidJson() throws Exception {
+        String json = "{ \"angle\": 45 }"; // Missing start object
+
+        mockMvc.perform(post("/api/v1/nextPosition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
                 .andExpect(status().isBadRequest());
     }
 

@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
 
 import uk.ac.ed.acp.cw2.dto.DistanceRequest;
+import uk.ac.ed.acp.cw2.dto.NextPositionRequest;
+import uk.ac.ed.acp.cw2.dto.Position;
 
 import java.net.URL;
 import java.time.Instant;
@@ -67,6 +69,29 @@ public class ServiceController {
         }
     }
 
+    @PostMapping("/nextPosition")
+    public ResponseEntity<Position> nextPosition(@RequestBody NextPositionRequest request) {
+        try {
+            Position start = request.getStart();
+            if (start == null) {
+                return ResponseEntity.badRequest().build();
+            }
 
+            double angle = request.getAngle();
+            double step = 0.00015;
+            double rad = Math.toRadians(angle);
+
+            double newLat = start.getLat() + step * Math.sin(rad);
+            double newLng = start.getLng() + step * Math.cos(rad);
+
+            Position next = new Position();
+            next.setLat(newLat);
+            next.setLng(newLng);
+
+            return ResponseEntity.ok(next);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
 
 }
