@@ -53,4 +53,18 @@ public class ServiceController {
         }
     }
 
+    @PostMapping("isCloseTo")
+    public ResponseEntity<Boolean> isCloseTo(@RequestBody DistanceRequest request) {
+        try {
+            double dx = request.getPosition1().getLng() - request.getPosition2().getLng();
+            double dy = request.getPosition1().getLat() - request.getPosition2().getLat();
+            double distance = Math.sqrt(dx * dx + dy * dy);
+
+            boolean close = distance < 0.00015;
+            return ResponseEntity.ok(close);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
 }
