@@ -8,12 +8,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
 
-import uk.ac.ed.acp.cw2.dto.DistanceRequest;
-import uk.ac.ed.acp.cw2.dto.NextPositionRequest;
-import uk.ac.ed.acp.cw2.dto.Position;
+import uk.ac.ed.acp.cw2.dto.*;
 
 import java.net.URL;
 import java.time.Instant;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Controller class that handles various HTTP endpoints for the application.
@@ -92,6 +92,53 @@ public class ServiceController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
         }
+    }
+
+    @PostMapping("/isInRegion")
+    public ResponseEntity<Boolean> isInRegion(@RequestBody IsInRegionRequest request) {
+        try {
+            Position point = request.getPosition();
+            Region region = request.getRegion();
+
+            if (point == null || region == null || region.getVertices() == null || region.getVertices().size() < 4) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            // Ensure the polygon is closed
+            Position first = region.getVertices().getFirst();
+            Position last = region.getVertices().getLast();
+            if (!Objects.equals(first.getLat(), last.getLat()) || !Objects.equals(first.getLng(), last.getLng())) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            boolean inside = isPointInPolygon(point, region.getVertices());
+            return ResponseEntity.ok(inside);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    // Ray-casting algorithm
+    private boolean isPointInPolygon(Position point, List<Position> vertices) {
+        int crossings = 0;
+        int count = vertices.size();
+
+        for (int i = 0; i < count - 1; i++) {
+            Position v1 = vertices.get(i);
+            Position v2 = vertices.get(i + 1);
+
+            boolean condY = (v1.getLat() > point.getLat()) != (v2.getLat() > point.getLat());
+            if (condY) {
+                double slope = (v2.getLng() - v1.getLng()) *
+                        (point.getLat() - v1.getLat()) /
+                        (v2.getLat() - v1.getLat()) + v1.getLng();
+                if (point.getLng() < slope) {
+                    crossings++;
+                }
+            }
+        }
+
+        return (crossings % 2 == 1); // odd = inside, even = outside
     }
 
 }

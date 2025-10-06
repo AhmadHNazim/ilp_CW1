@@ -150,4 +150,92 @@ public class ServiceControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    public void testIsInRegion_PointInside() throws Exception {
+        String json = """
+        {
+          "position": { "lng": -3.188, "lat": 55.944 },
+          "region": {
+            "name": "central",
+            "vertices": [
+              {"lng": -3.192473, "lat": 55.946233},
+              {"lng": -3.192473, "lat": 55.942617},
+              {"lng": -3.184319, "lat": 55.942617},
+              {"lng": -3.184319, "lat": 55.946233},
+              {"lng": -3.192473, "lat": 55.946233}
+            ]
+          }
+        }
+    """;
+
+        mockMvc.perform(post("/api/v1/isInRegion")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(content().string("true"));
+    }
+
+    @Test
+    public void testIsInRegion_PointOutside() throws Exception {
+        String json = """
+        {
+          "position": { "lng": -3.200, "lat": 55.950 },
+          "region": {
+            "name": "central",
+            "vertices": [
+              {"lng": -3.192473, "lat": 55.946233},
+              {"lng": -3.192473, "lat": 55.942617},
+              {"lng": -3.184319, "lat": 55.942617},
+              {"lng": -3.184319, "lat": 55.946233},
+              {"lng": -3.192473, "lat": 55.946233}
+            ]
+          }
+        }
+    """;
+
+        mockMvc.perform(post("/api/v1/isInRegion")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(content().string("false"));
+    }
+
+    @Test
+    public void testIsInRegion_InvalidPolygon_NotClosed() throws Exception {
+        String json = """
+        {
+          "position": { "lng": -3.188, "lat": 55.944 },
+          "region": {
+            "name": "central",
+            "vertices": [
+              {"lng": -3.192473, "lat": 55.946233},
+              {"lng": -3.192473, "lat": 55.942617},
+              {"lng": -3.184319, "lat": 55.942617},
+              {"lng": -3.184319, "lat": 55.946233}
+            ]
+          }
+        }
+    """;
+
+        mockMvc.perform(post("/api/v1/isInRegion")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    public void testIsInRegion_InvalidJson_MissingFields() throws Exception {
+        String json = """
+        {
+          "position": { "lat": 55.944 },
+          "region": null
+        }
+    """;
+
+        mockMvc.perform(post("/api/v1/isInRegion")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isBadRequest());
+    }
+
 }
