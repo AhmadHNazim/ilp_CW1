@@ -3,10 +3,10 @@ package uk.ac.ed.acp.cw2;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import uk.ac.ed.acp.cw2.controller.GeometricServiceController;
 import uk.ac.ed.acp.cw2.dto.DistanceRequest;
 import uk.ac.ed.acp.cw2.dto.Position;
 
@@ -15,8 +15,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(GeometricServiceController.class)
-public class GeometricServiceControllerTest {
+@SpringBootTest
+@AutoConfigureMockMvc
+public class GeometricServiceControllerTests {
 
     @Autowired
     private MockMvc mockMvc;
@@ -32,7 +33,7 @@ public class GeometricServiceControllerTest {
     }
 
     @Test
-    public void testValidDistanceRequestDynamic() throws Exception {
+    public void testValidDistanceTo() throws Exception {
         // Create positions
         Position p1 = new Position();
         p1.setLat(55.946233);
@@ -60,7 +61,7 @@ public class GeometricServiceControllerTest {
     }
 
     @Test
-    public void testInvalidDistanceRequest() throws Exception {
+    public void testInvalidDistanceTo() throws Exception {
         String invalidJson = "{ \"position1\": { \"lat\": 55.946233 } }"; // missing lng and position2
 
         mockMvc.perform(post("/api/v1/distanceTo")
@@ -138,6 +139,21 @@ public class GeometricServiceControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.lng").value(-3.192473))
                 .andExpect(jsonPath("$.lat").value(closeTo(55.946233 + 0.00015, 1e-7)));
+    }
+
+    @Test
+    public void testNextPosition_InvalidAngle() throws Exception {
+        String json = """
+        {
+            "start": {"lng": -3.192473, "lat": 55.946233},
+            "angle": 100
+        }
+    """;
+
+        mockMvc.perform(post("/api/v1/nextPosition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

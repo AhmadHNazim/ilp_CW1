@@ -80,4 +80,11 @@ public class GeometricService {
         }
         return crossings % 2 == 1;
     }
+
+    public Position makePos(double lng, double lat) {
+        Position p = new Position();
+        p.setLng(lng);
+        p.setLat(lat);
+        return p;
+    }
 }
