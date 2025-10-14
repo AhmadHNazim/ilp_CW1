@@ -6,7 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import uk.ac.ed.acp.cw2.controller.ServiceController;
+import uk.ac.ed.acp.cw2.controller.GeometricServiceController;
 import uk.ac.ed.acp.cw2.dto.DistanceRequest;
 import uk.ac.ed.acp.cw2.dto.Position;
 
@@ -15,8 +15,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(ServiceController.class)
-public class ServiceControllerTest {
+@WebMvcTest(GeometricServiceController.class)
+public class GeometricServiceControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
