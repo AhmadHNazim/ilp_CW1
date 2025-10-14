@@ -1,2 +1,2 @@
-# Getting Started
+# ILP CW1 - Java Rest Service
 
