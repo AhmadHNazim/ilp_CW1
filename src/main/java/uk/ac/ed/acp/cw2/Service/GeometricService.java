@@ -14,8 +14,14 @@ public class GeometricService {
     private static final double EPSILON = 1e-9;
 
     public double calculateDistance(DistanceRequest request) {
-        double dx = request.getPosition1().getLng() - request.getPosition2().getLng();
-        double dy = request.getPosition1().getLat() - request.getPosition2().getLat();
+        Position p1 = request.getPosition1();
+        Position p2 = request.getPosition2();
+
+        validateCoordinate(p1.getLat(), p1.getLng());
+        validateCoordinate(p2.getLat(), p2.getLng());
+
+        double dx = p1.getLng() - p2.getLng();
+        double dy = p1.getLat() - p2.getLat();
         return Math.sqrt(dx * dx + dy * dy);
     }
 
@@ -27,10 +33,10 @@ public class GeometricService {
         Position start = request.getStart();
         double angle = request.getAngle();
 
-        double quotient = angle / COMPASS_DEGREE;
-        if (start == null || (Math.abs(quotient - Math.round(quotient)) > EPSILON)) {
-            throw new IllegalArgumentException();
-        }
+        if (start == null) throw new IllegalArgumentException();
+
+        validateCoordinate(start.getLat(), start.getLng());
+        validateAngle(angle);
 
         double rad = Math.toRadians(angle);
         double newLat = start.getLat() + STEP_SIZE * Math.sin(rad);
@@ -51,7 +57,14 @@ public class GeometricService {
             throw new IllegalArgumentException();
         }
 
+        validateCoordinate(point.getLat(), point.getLng());
+
         List<Position> vertices = region.getVertices();
+
+        for (Position v : vertices) {
+            validateCoordinate(v.getLat(), v.getLng());
+        }
+
         Position first = vertices.getFirst();
         Position last = vertices.getLast();
 
@@ -86,5 +99,25 @@ public class GeometricService {
         p.setLng(lng);
         p.setLat(lat);
         return p;
+    }
+
+    private void validateCoordinate(double lat, double lng) {
+        if (lat < -90 || lat > 90) {
+            throw new IllegalArgumentException();
+        }
+        if (lng < -180 || lng > 180) {
+            throw new IllegalArgumentException();
+        }
+    }
+
+    private void validateAngle(double angle) {
+        if (angle < 0 || angle >= 360) {
+            throw new IllegalArgumentException();
+        }
+
+        double quotient = angle / COMPASS_DEGREE;
+        if (Math.abs(quotient - Math.round(quotient)) > EPSILON) {
+            throw new IllegalArgumentException();
+        }
     }
 }
