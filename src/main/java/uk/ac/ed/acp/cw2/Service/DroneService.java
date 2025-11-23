@@ -8,9 +8,13 @@ import uk.ac.ed.acp.cw2.dto.*;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import uk.ac.ed.acp.cw2.dto.CalcDeliveryResponse;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -279,4 +283,382 @@ public class DroneService {
 
         return false; // No service point satisfies this dispatch
     }
+
+    private static final double STEP_SIZE = 0.00015;
+    private static final double[] ALLOWED_ANGLES = new double[16];
+    static {
+        for (int i = 0; i < 16; i++) ALLOWED_ANGLES[i] = i * 22.5;
+    }
+
+    /**
+     * Main entry for calcDeliveryPath using A* on 16-direction grid.
+     */
+    public CalcDeliveryResponse calcDeliveryPath(List<MedDispatchRec> dispatches) {
+        // fetch ILP resources
+        Drone[] allDrones = ilpClient.getAllDrones();
+        Map<Integer, Drone> droneMap = Arrays.stream(allDrones)
+                .collect(Collectors.toMap(Drone::getId, d -> d));
+
+        DroneForServicePoint[] dfspArray = ilpClient.getAllDronesForServicePoints();
+        List<DroneForServicePoint> dfsps = dfspArray == null ? List.of() : Arrays.asList(dfspArray);
+
+        ServicePoint[] servicePointsArr = ilpClient.getAllServicePoints();
+        Map<Integer, ServicePoint> servicePointById = servicePointsArr == null
+                ? Map.of()
+                : Arrays.stream(servicePointsArr).collect(Collectors.toMap(ServicePoint::getId, sp -> sp));
+
+        RestrictedArea[] raArray = ilpClient.getRestrictedAreas();
+        List<RestrictedArea> restrictedAreas = raArray == null ? List.of() : Arrays.asList(raArray);
+
+        // pending dispatch map id -> MedDispatchRec (retain insertion order)
+        Map<Integer, MedDispatchRec> pending = new LinkedHashMap<>();
+        for (MedDispatchRec m : dispatches) pending.put(m.getId(), m);
+
+        List<CalcDeliveryResponse.DronePath> resultDronePaths = new ArrayList<>();
+        int totalMoves = 0;
+        double totalCost = 0.0;
+
+        // iterate over service points and available drones greedily
+        outerServicePointLoop:
+        for (DroneForServicePoint spEntry : dfsps) {
+            ServicePoint sp = servicePointById.get(spEntry.getServicePointId());
+            if (sp == null) continue;
+
+            // for each drone availability at this service point
+            for (DroneForServicePoint.DroneAvailability avail : spEntry.getDrones()) {
+                Drone drone = droneMap.get(avail.getId());
+                if (drone == null) continue;
+
+                // attempt to build a route for this drone starting/ending at sp
+                List<CalcDeliveryResponse.DeliveryPath> deliveriesForDrone = new ArrayList<>();
+                Position startPos = sp.getLocation();
+                Position currentPos = makePos(startPos.getLng(), startPos.getLat());
+
+                int movesUsedForDrone = 0;
+
+                // Keep attempting to take the best reachable pending dispatch until none left or drone exhausted
+                boolean didProgress;
+                do {
+                    didProgress = false;
+                    // choose candidate that leads to minimal extra moves (heuristic)
+                    Integer chosenId = null;
+                    List<Position> chosenPathToDelivery = null;
+                    List<Position> chosenReturnPath = null;
+                    int chosenExtraMoves = Integer.MAX_VALUE;
+                    double chosenFlightCost = 0.0;
+
+                    for (MedDispatchRec candidate : List.copyOf(pending.values())) {
+                        Position delivery = candidate.getDelivery();
+                        if (delivery == null) continue; // skip invalid
+
+                        // availability check for this drone at this service point/time
+                        if (!isDroneAvailableAtSlot(avail, candidate.getDate(), candidate.getTime())) {
+                            continue;
+                        }
+
+                        // A* from currentPos -> delivery
+                        List<Position> pathToDelivery = aStarPath(currentPos, delivery, restrictedAreas, drone.getCapability().getMaxMoves());
+                        if (pathToDelivery == null) continue; // unreachable
+
+                        // A* from delivery -> service point (return)
+                        List<Position> pathReturn = aStarPath(delivery, startPos, restrictedAreas, drone.getCapability().getMaxMoves());
+                        if (pathReturn == null) continue; // cannot return => invalid
+
+                        // compute moves: moves are edges = nodes-1
+                        int movesTo = Math.max(0, pathToDelivery.size() - 1);
+                        // hover represented by adding an identical position => +1 move for hover
+                        int hoverMoves = 1;
+                        int movesReturn = Math.max(0, pathReturn.size() - 1);
+                        int extraMoves = movesTo + hoverMoves + movesReturn;
+
+                        // ensure drone does not exceed maxMoves
+                        if (movesUsedForDrone + extraMoves > drone.getCapability().getMaxMoves()) {
+                            continue;
+                        }
+
+                        // compute flight cost for this flight (start -> delivery -> return)
+                        double flightCost = drone.getCapability().getCostInitial()
+                                + drone.getCapability().getCostFinal()
+                                + (extraMoves) * drone.getCapability().getCostPerMove();
+
+                        // respect candidate maxCost if present
+                        Double maxCost = candidate.getRequirements() == null ? null : candidate.getRequirements().getMaxCost();
+                        if (maxCost != null && flightCost > maxCost) continue;
+
+                        // pick candidate with smallest extraMoves (tie-breaker: smaller flightCost)
+                        if (extraMoves < chosenExtraMoves || (extraMoves == chosenExtraMoves && flightCost < chosenFlightCost)) {
+                            chosenId = candidate.getId();
+                            chosenPathToDelivery = pathToDelivery;
+                            chosenReturnPath = pathReturn;
+                            chosenExtraMoves = extraMoves;
+                            chosenFlightCost = flightCost;
+                        }
+                    }
+
+                    if (chosenId != null) {
+                        // we will commit chosen candidate
+                        didProgress = true;
+
+                        // build flightPath segment: pathToDelivery + hover (duplicate last position)
+                        List<Position> flightToDelivery = new ArrayList<>(chosenPathToDelivery);
+                        // append hover duplicate
+                        flightToDelivery.add(flightToDelivery.get(flightToDelivery.size() - 1));
+
+                        // add as delivery segment
+                        deliveriesForDrone.add(new CalcDeliveryResponse.DeliveryPath(chosenId, flightToDelivery));
+
+                        // update counters and pending set
+                        movesUsedForDrone += chosenExtraMoves;
+                        totalMoves += chosenExtraMoves;
+                        totalCost += chosenFlightCost;
+
+                        // mark delivered and remove
+                        pending.remove(chosenId);
+
+                        // update current position to delivery (the last real position)
+                        MedDispatchRec finished = null;
+                        Position deliveryPos = flightToDelivery.get(flightToDelivery.size() - 1); // the hover duplicate
+                        currentPos = makePos(deliveryPos.getLng(), deliveryPos.getLat());
+
+                    }
+                } while (didProgress && !pending.isEmpty());
+
+                // If this drone delivered any, append final return-to-base path as a delivery-like segment (deliveryId = null)
+                if (!deliveriesForDrone.isEmpty()) {
+                    // compute return path from currentPos -> startPos
+                    List<Position> returnPath = aStarPath(currentPos, startPos, restrictedAreas, drone.getCapability().getMaxMoves());
+                    if (returnPath != null && returnPath.size() > 0) {
+                        deliveriesForDrone.add(new CalcDeliveryResponse.DeliveryPath(null, returnPath));
+                        int returnMoves = Math.max(0, returnPath.size() - 1);
+                        totalMoves += returnMoves;
+                        movesUsedForDrone += returnMoves;
+                        // cost for the return-only segment: we already charged costInitial+costFinal when choosing the first delivery.
+                        // To keep costs consistent, we will **not** double-charge initial+final for each segment; instead costs were added per chosen candidate above (which included full flight start->return).
+                    }
+
+                    resultDronePaths.add(new CalcDeliveryResponse.DronePath(drone.getId(), deliveriesForDrone));
+                }
+
+                if (pending.isEmpty()) break outerServicePointLoop;
+            }
+        }
+
+        // Build and return response
+        CalcDeliveryResponse resp = new CalcDeliveryResponse();
+        resp.setTotalCost(totalCost);
+        resp.setTotalMoves(totalMoves);
+        resp.setDronePaths(resultDronePaths);
+        return resp;
+    }
+
+
+    private List<Position> aStarPath(Position start, Position goal, List<RestrictedArea> restrictedAreas, int maxMovesLimit) {
+        if (start == null || goal == null) return null;
+
+        // trivial close check
+        DistanceRequest closeCheck = new DistanceRequest();
+        closeCheck.setPosition1(start);
+        closeCheck.setPosition2(goal);
+        if (geometricService.calculateDistance(closeCheck) <= STEP_SIZE / 2) {
+            // already at target: return single node (caller may append hover)
+            List<Position> p = new ArrayList<>();
+            p.add(makePos(start.getLng(), start.getLat()));
+            return p;
+        }
+
+        // node key formatting to stable string to avoid floating noise
+        var df = new DecimalFormat("0.0000000000", DecimalFormatSymbols.getInstance(Locale.US));
+
+        Function<Position, String> keyOf = pos -> df.format(pos.getLat()) + "," + df.format(pos.getLng());
+
+        class Node implements Comparable<Node> {
+            Position pos;
+            int g; // moves so far
+            double f; // g + heuristic
+            Node(Position pos, int g, double f) { this.pos = pos; this.g = g; this.f = f; }
+            @Override public int compareTo(Node o) { return Double.compare(this.f, o.f); }
+        }
+
+        PriorityQueue<Node> open = new PriorityQueue<>();
+        Map<String, Integer> gScore = new HashMap<>();
+        Map<String, Position> cameFrom = new HashMap<>();
+
+        Position startCopy = makePos(start.getLng(), start.getLat());
+        Position goalCopy = makePos(goal.getLng(), goal.getLat());
+        String startKey = keyOf.apply(startCopy);
+        String goalKey = keyOf.apply(goalCopy);
+
+        // heuristic: Euclidean distance / STEP_SIZE -> estimated moves
+        DistanceRequest hdr = new DistanceRequest();
+        hdr.setPosition1(startCopy);
+        hdr.setPosition2(goalCopy);
+        double hStart = geometricService.calculateDistance(hdr) / STEP_SIZE;
+
+        open.add(new Node(startCopy, 0, hStart));
+        gScore.put(startKey, 0);
+
+        int expansions = 0;
+        int maxExpansions = (maxMovesLimit > 0) ? Math.min(maxMovesLimit * 5, 50000) : 50000; // safety cap
+
+        while (!open.isEmpty() && expansions++ < maxExpansions) {
+            Node current = open.poll();
+            String currKey = keyOf.apply(current.pos);
+
+            // stop if within STEP_SIZE/2 of goal
+            DistanceRequest stopCheck = new DistanceRequest();
+            stopCheck.setPosition1(current.pos);
+            stopCheck.setPosition2(goalCopy);
+            if (geometricService.calculateDistance(stopCheck) <= STEP_SIZE / 2) {
+                // reconstruct path from startKey -> current.pos -> goal (append goal as exact)
+                List<Position> path = reconstructPath(cameFrom, keyOf, startKey, currKey);
+                // append final exact goal position (so return path ends at the delivery coordinates)
+                path.add(makePos(goalCopy.getLng(), goalCopy.getLat()));
+                return path;
+            }
+
+            // generate neighbors
+            for (double angle : ALLOWED_ANGLES) {
+                NextPositionRequest npr = new NextPositionRequest();
+                npr.setStart(current.pos);
+                npr.setAngle(angle);
+                Position neighbor;
+                try {
+                    neighbor = geometricService.nextPosition(npr);
+                } catch (Exception e) {
+                    continue; // invalid angle or coords
+                }
+                if (neighbor == null) continue;
+
+                // skip if neighbor is inside restricted area (we treat a restricted area with missing limits as NO-FLY if limits absent)
+                boolean blocked = false;
+                for (RestrictedArea ra : restrictedAreas) {
+                    try {
+                        if (ra.getVertices() != null && !ra.getVertices().isEmpty()) {
+                            IsInRegionRequest irr = new IsInRegionRequest();
+                            irr.setPosition(neighbor);
+                            irr.setRegion(toRegion(ra));
+                            if (geometricService.isInRegion(irr)) {
+                                blocked = true;
+                                break;
+                            }
+                        } else {
+                            // limits missing -> whole area is no-fly; but if vertices empty skip
+                        }
+                    } catch (Exception ignored) {}
+                }
+                if (blocked) continue;
+
+                String neighKey = keyOf.apply(neighbor);
+                int tentativeG = current.g + 1; // one additional move
+
+                Integer prevG = gScore.get(neighKey);
+                if (prevG == null || tentativeG < prevG) {
+                    cameFrom.put(neighKey, current.pos);
+                    gScore.put(neighKey, tentativeG);
+                    // heuristic from neighbor -> goal
+                    DistanceRequest hdr2 = new DistanceRequest();
+                    hdr2.setPosition1(neighbor);
+                    hdr2.setPosition2(goalCopy);
+                    double h = geometricService.calculateDistance(hdr2) / STEP_SIZE;
+                    double f = tentativeG + h;
+                    open.add(new Node(neighbor, tentativeG, f));
+                }
+            }
+        }
+
+        // failed to find path within expansion limits
+        return null;
+    }
+
+    private List<Position> reconstructPath(Map<String, Position> cameFrom, Function<Position, String> keyOf,
+                                           String startKey, String currentKey) {
+        LinkedList<Position> path = new LinkedList<>();
+        // currentKey corresponds to some Position; we need its Position. cameFrom stores mapping from childKey -> parentPos (not parentKey)
+        // find current position by parsing key
+        String[] parts = currentKey.split(",");
+        double lat = Double.parseDouble(parts[0]);
+        double lng = Double.parseDouble(parts[1]);
+        Position curr = makePos(lng, lat);
+        path.addFirst(curr);
+        String key = currentKey;
+        while (!key.equals(startKey)) {
+            Position parent = cameFrom.get(key);
+            if (parent == null) break;
+            path.addFirst(makePos(parent.getLng(), parent.getLat()));
+            key = keyOf.apply(parent);
+        }
+        // ensure start at startKey position as first element (might be identical)
+        return new ArrayList<>(path);
+    }
+
+    private Position makePos(double lng, double lat) {
+        Position p = new Position();
+        p.setLng(lng);
+        p.setLat(lat);
+        return p;
+    }
+
+    /* Availability check used earlier (keeps unchanged logic) */
+    private boolean isDroneAvailableAtSlot(DroneForServicePoint.DroneAvailability availability, String dateStr, String timeStr) {
+        if (dateStr == null || timeStr == null) return true;
+
+        LocalDate d;
+        LocalTime t;
+        try {
+            d = LocalDate.parse(dateStr);
+            t = LocalTime.parse(timeStr);
+        } catch (Exception e) {
+            return false;
+        }
+
+        String dow = d.getDayOfWeek().toString();
+
+        for (DroneForServicePoint.DroneAvailability.Availability slot : availability.getAvailability()) {
+            if (!slot.getDayOfWeek().equalsIgnoreCase(dow)) continue;
+
+            LocalTime from = LocalTime.parse(slot.getFrom());
+            LocalTime until = LocalTime.parse(slot.getUntil());
+
+            if ((t.equals(from) || t.isAfter(from)) && (t.equals(until) || t.isBefore(until))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Region toRegion(RestrictedArea ra) {
+        Region region = new Region();
+        region.setName(ra.getName());
+        region.setVertices(ra.getVertices()); // same type, so OK
+        return region;
+    }
+
+    public Map<String, Object> calcDeliveryPathAsGeoJson(List<MedDispatchRec> dispatches) {
+        CalcDeliveryResponse response = calcDeliveryPath(dispatches);
+
+        // Flatten all flight positions for the first drone (assumes single drone can deliver all)
+        List<Position> fullPath = new ArrayList<>();
+        if (!response.getDronePaths().isEmpty()) {
+            CalcDeliveryResponse.DronePath dronePath = response.getDronePaths().get(0);
+            for (CalcDeliveryResponse.DeliveryPath delivery : dronePath.getDeliveries()) {
+                fullPath.addAll(delivery.getFlightPath());
+            }
+        }
+
+        // Build GeoJSON LineString
+        Map<String, Object> geoJson = new HashMap<>();
+        geoJson.put("type", "Feature");
+        geoJson.put("properties", Map.of("droneId", response.getDronePaths().isEmpty() ? null : response.getDronePaths().get(0).getDroneId()));
+
+        Map<String, Object> geometry = new HashMap<>();
+        geometry.put("type", "LineString");
+        geometry.put("coordinates", fullPath.stream()
+                .map(p -> List.of(p.getLng(), p.getLat()))
+                .toList());
+
+        geoJson.put("geometry", geometry);
+        return geoJson;
+    }
+
 }

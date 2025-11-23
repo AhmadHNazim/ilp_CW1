@@ -4,11 +4,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import uk.ac.ed.acp.cw2.Service.DroneService;
 import uk.ac.ed.acp.cw2.Service.IlpClient;
+import uk.ac.ed.acp.cw2.dto.CalcDeliveryResponse;
 import uk.ac.ed.acp.cw2.dto.Drone;
 import uk.ac.ed.acp.cw2.dto.MedDispatchRec;
 import uk.ac.ed.acp.cw2.dto.QueryAttribute;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -42,5 +44,15 @@ public class DroneController {
     @PostMapping("/queryAvailableDrones")
     public List<Integer> queryAvailableDrones(@RequestBody List<MedDispatchRec> dispatches) {
         return droneService.queryAvailableDrones(dispatches);
+    }
+
+    @PostMapping("/calcDeliveryPath")
+    public CalcDeliveryResponse calcDeliveryPath(@RequestBody List<MedDispatchRec> dispatchRequests) {
+        return droneService.calcDeliveryPath(dispatchRequests);
+    }
+
+    @PostMapping("/calcDeliveryPathAsGeoJson")
+    public Map<String, Object> calcDeliveryPathAsGeoJson(@RequestBody List<MedDispatchRec> dispatches) {
+        return droneService.calcDeliveryPathAsGeoJson(dispatches);
     }
 }
