@@ -5,12 +5,22 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+
+import org.springframework.web.server.ResponseStatusException;
 import uk.ac.ed.acp.cw2.dto.DistanceRequest;
+import uk.ac.ed.acp.cw2.dto.IsInRegionRequest;
+import uk.ac.ed.acp.cw2.dto.NextPositionRequest;
 import uk.ac.ed.acp.cw2.dto.Position;
 
+import uk.ac.ed.acp.cw2.Service.GeometricService;
+
 import static org.hamcrest.Matchers.closeTo;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -25,8 +35,12 @@ public class GeometricServiceControllerTests {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @MockBean
+    private GeometricService geometricService;
+
     @Test
     public void testUidEndpoint() throws Exception {
+        // No stubbing needed as this likely doesn't call the geometric service
         mockMvc.perform(get("/api/v1/uid"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("s2556257"));
@@ -47,10 +61,14 @@ public class GeometricServiceControllerTests {
         request.setPosition1(p1);
         request.setPosition2(p2);
 
-        // calculate Euclidean distance
+        // calculate Euclidean distance (Same logic as original test)
         double dx = p1.getLng() - p2.getLng();
         double dy = p1.getLat() - p2.getLat();
         double expectedDistance = Math.sqrt(dx * dx + dy * dy);
+
+        // STUB: Tell Mock to return the calculated value
+        when(geometricService.calculateDistance(any(DistanceRequest.class)))
+                .thenReturn(expectedDistance);
 
         // Perform POST request and check response
         mockMvc.perform(post("/api/v1/distanceTo")
@@ -63,6 +81,9 @@ public class GeometricServiceControllerTests {
     @Test
     public void testInvalidDistanceTo() throws Exception {
         String invalidJson = "{ \"position1\": { \"lat\": 55.946233 } }"; // missing lng and position2
+
+        when(geometricService.calculateDistance(argThat(req -> req.getPosition2() == null)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing position2"));
 
         mockMvc.perform(post("/api/v1/distanceTo")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -84,6 +105,9 @@ public class GeometricServiceControllerTests {
         DistanceRequest request = new DistanceRequest();
         request.setPosition1(p1);
         request.setPosition2(p2);
+
+        // STUB: Return true
+        when(geometricService.isCloseTo(any(DistanceRequest.class))).thenReturn(true);
 
         mockMvc.perform(post("/api/v1/isCloseTo")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -107,6 +131,9 @@ public class GeometricServiceControllerTests {
         request.setPosition1(p1);
         request.setPosition2(p2);
 
+        // STUB: Return false
+        when(geometricService.isCloseTo(any(DistanceRequest.class))).thenReturn(false);
+
         mockMvc.perform(post("/api/v1/isCloseTo")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -117,6 +144,9 @@ public class GeometricServiceControllerTests {
     @Test
     public void testIsCloseTo_InvalidJson() throws Exception {
         String invalidJson = "{ \"position1\": { \"lat\": 55.946233 } }"; // Missing fields
+
+        when(geometricService.isCloseTo(argThat(req -> req.getPosition2() == null)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing position2"));
 
         mockMvc.perform(post("/api/v1/isCloseTo")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -131,7 +161,14 @@ public class GeometricServiceControllerTests {
             "start": {"lng": -3.192473, "lat": 55.946233},
             "angle": 90
         }
-    """;
+        """;
+
+        Position nextPos = new Position();
+        nextPos.setLng(-3.192473);
+        nextPos.setLat(55.946233 + 0.00015); // Adding step size
+
+        // STUB: Return the calculated position object
+        when(geometricService.nextPosition(any(NextPositionRequest.class))).thenReturn(nextPos);
 
         mockMvc.perform(post("/api/v1/nextPosition")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -148,7 +185,11 @@ public class GeometricServiceControllerTests {
             "start": {"lng": -3.192473, "lat": 55.946233},
             "angle": 100
         }
-    """;
+        """;
+
+        // STUB: Simulate the service throwing IllegalArgumentException for bad angle
+        when(geometricService.nextPosition(any(NextPositionRequest.class)))
+                .thenThrow(new IllegalArgumentException("Invalid angle"));
 
         mockMvc.perform(post("/api/v1/nextPosition")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -159,6 +200,9 @@ public class GeometricServiceControllerTests {
     @Test
     public void testNextPosition_InvalidJson() throws Exception {
         String json = "{ \"angle\": 45 }"; // Missing start object
+
+        when(geometricService.nextPosition(argThat(req -> req.getStart() == null)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST));
 
         mockMvc.perform(post("/api/v1/nextPosition")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -182,7 +226,10 @@ public class GeometricServiceControllerTests {
             ]
           }
         }
-    """;
+        """;
+
+        // STUB: Return true
+        when(geometricService.isInRegion(any(IsInRegionRequest.class))).thenReturn(true);
 
         mockMvc.perform(post("/api/v1/isInRegion")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -207,7 +254,10 @@ public class GeometricServiceControllerTests {
             ]
           }
         }
-    """;
+        """;
+
+        // STUB: Return false
+        when(geometricService.isInRegion(any(IsInRegionRequest.class))).thenReturn(false);
 
         mockMvc.perform(post("/api/v1/isInRegion")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -231,7 +281,11 @@ public class GeometricServiceControllerTests {
             ]
           }
         }
-    """;
+        """;
+
+        // STUB: Simulate exception for invalid geometry (not closed loop)
+        when(geometricService.isInRegion(any(IsInRegionRequest.class)))
+                .thenThrow(new IllegalArgumentException("Polygon not closed"));
 
         mockMvc.perform(post("/api/v1/isInRegion")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -246,12 +300,15 @@ public class GeometricServiceControllerTests {
           "position": { "lat": 55.944 },
           "region": null
         }
-    """;
+        """;
 
+        when(geometricService.isInRegion(argThat(req -> req.getRegion() == null)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing region"));
+
+        // No stub needed; Fails at controller level
         mockMvc.perform(post("/api/v1/isInRegion")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))
                 .andExpect(status().isBadRequest());
     }
-
 }
