@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import uk.ac.ed.acp.cw2.dto.*;
 
 import java.time.LocalDate;
@@ -19,6 +21,9 @@ import java.util.Locale;
 @Service
 @RequiredArgsConstructor
 public class DroneService {
+
+    // Create a logger instance for this class
+    private static final Logger logger = LoggerFactory.getLogger(DroneService.class);
 
     private final IlpClient ilpClient;
     private final GeometricService geometricService;
@@ -130,6 +135,15 @@ public class DroneService {
     }
 
     private boolean matchesAttribute2(Drone drone, QueryAttribute query) {
+        // REQ-NFR-05: Robustness Instrumentation
+        if (query.getAttribute() == null || query.getOperator() == null || query.getValue() == null) {
+            // We log at DEBUG or WARN level so the tester can see WHY the match failed
+            logger.warn("Robustness Check: Skipping query constraint due to null field(s). Attribute: {}, Op: {}, Value: {}",
+                    query.getAttribute(), query.getOperator(), query.getValue());
+
+            return false; // Graceful fallback
+        }
+
         String attr = query.getAttribute().toLowerCase();
         String op = query.getOperator();
         String valueStr = query.getValue();
@@ -227,7 +241,16 @@ public class DroneService {
     }
 
     private boolean canServeAllDispatches(Drone drone, List<MedDispatchRec> dispatchRequests, List<DroneForServicePoint> droneServicePoints) {
+
         for (MedDispatchRec request : dispatchRequests) {
+            // --- FIX: Robustness Check for REQ-NFR-05 ---
+            // Verify critical data exists before accessing it to prevent NPE (500 error)
+            if (request.getRequirements() == null) {
+                // Log the warning so we have an audit trail for why this was skipped
+                logger.warn("Robustness: Skipping dispatch {} due to missing requirements.", request.getId());
+                return false;
+            }
+
             MedDispatchRequirements requirements = request.getRequirements();
 
             // Capability checks

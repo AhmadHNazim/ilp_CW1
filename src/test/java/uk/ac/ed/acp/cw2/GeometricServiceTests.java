@@ -118,4 +118,45 @@ class GeometricServiceTests {
 
         assertThrows(IllegalArgumentException.class, () -> geometricService.isInRegion(req));
     }
+
+    @Test
+    void testIsInRegion_OnVertex_BVA() {
+        // REQ-GEO-04 Boundary Case: Point is exactly on a vertex
+        Position vertex = geometricService.makePos(-3.192473, 55.946233);
+
+        Region region = createSampleRegion();
+        IsInRegionRequest req = new IsInRegionRequest();
+        req.setPosition(vertex);
+        req.setRegion(region);
+
+        // Standard Ray-Casting often treats vertices as outside or edge cases;
+        // current logic handles it via strictly greater/lesser comparisons.
+        assertFalse(geometricService.isInRegion(req), "Vertex should strictly not be 'inside' for safety");
+    }
+
+    @Test
+    void testIsInRegion_NearMiss_BVA() {
+        // REQ-GEO-04 Boundary Case: Point is epsilon outside the boundary
+        // Using the epsilon from GeometricService
+        Position nearMiss = geometricService.makePos(-3.192473 - 1e-10, 55.944);
+
+        Region region = createSampleRegion();
+        IsInRegionRequest req = new IsInRegionRequest();
+        req.setPosition(nearMiss);
+        req.setRegion(region);
+
+        assertFalse(geometricService.isInRegion(req));
+    }
+
+    private Region createSampleRegion() {
+        Region region = new Region();
+        region.setVertices(List.of(
+                geometricService.makePos(-3.192473, 55.946233),
+                geometricService.makePos(-3.192473, 55.942617),
+                geometricService.makePos(-3.184319, 55.942617),
+                geometricService.makePos(-3.184319, 55.946233),
+                geometricService.makePos(-3.192473, 55.946233)
+        ));
+        return region;
+    }
 }

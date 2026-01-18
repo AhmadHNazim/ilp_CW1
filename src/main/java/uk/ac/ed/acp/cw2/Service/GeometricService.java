@@ -1,6 +1,8 @@
 package uk.ac.ed.acp.cw2.Service;
 
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import uk.ac.ed.acp.cw2.dto.*;
 
 import java.util.List;
@@ -8,6 +10,8 @@ import java.util.Objects;
 
 @Service
 public class GeometricService {
+
+    private static final Logger logger = LoggerFactory.getLogger(GeometricService.class);
 
     private static final double STEP_SIZE = 0.00015;
     private static final double COMPASS_DEGREE = 22.5;
@@ -77,6 +81,10 @@ public class GeometricService {
 
     private boolean isPointInPolygon(Position point, List<Position> vertices) {
         int crossings = 0;
+        // REQ-GEO-04 Instrumentation: Initial state visibility
+        logger.debug("Safety Check: Starting ray-cast for point [{}, {}] against polygon with {} vertices.",
+                point.getLng(), point.getLat(), vertices.size());
+
         for (int i = 0; i < vertices.size() - 1; i++) {
             Position v1 = vertices.get(i);
             Position v2 = vertices.get(i + 1);
@@ -88,10 +96,18 @@ public class GeometricService {
                         (v2.getLat() - v1.getLat()) + v1.getLng();
                 if (point.getLng() < slope) {
                     crossings++;
+                    // REQ-GEO-04 Instrumentation: Track internal crossing logic
+                    logger.debug("Boundary Hit: Ray intersected edge between vertex {} and {}. Current crossing count: {}", i, i+1, crossings);
                 }
             }
         }
-        return crossings % 2 == 1;
+
+        boolean isInside = crossings % 2 == 1;
+        // REQ-GEO-04 Instrumentation: Final result visibility
+        logger.info("Safety Result: Point is {} restricted area (Total Crossings: {}).",
+                isInside ? "INSIDE" : "OUTSIDE", crossings);
+
+        return isInside;
     }
 
     public Position makePos(double lng, double lat) {
