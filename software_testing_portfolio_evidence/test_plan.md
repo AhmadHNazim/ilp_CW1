@@ -13,6 +13,7 @@ We assign limited testing resources based on the priority and risk level of each
     2. **Automated Boundary Testing:** Using Boundary Value Analysis (BVA) to test coordinates exactly on or near the polygon edges.
 * **Pre-requisites:** Requires a complete implementation of the `GeometricService` logic and defined `Region` and `Position` DTOs.
 * **Testing Window:** Testing is possible early in the development lifecycle at the component (unit) level.
+* **Goal Test Coverage:** 100% statement coverage alongside 100% branch coverage
 
 ### REQ-NFR-05: API Robustness - DroneController (High Priority)
 * **Assessment:** Critical for system viability and reliability; the service must handle invalid inputs without exposing stack traces or crashing.
@@ -23,6 +24,7 @@ We assign limited testing resources based on the priority and risk level of each
     3. **404 Not Found:** Exclusively for `@GetMapping("/droneDetails/{id}")` when a valid ID format is provided but no drone exists in the system.
 * **Pre-requisites:** Requires the `DroneController` and the `MedDispatchRec` data structures to be implemented.
 * **Testing Window:** This is possible once the controller endpoints are established and integrated with the Spring framework.
+* **Goal Test Coverage:** 100% statement coverage
 
 ---
 
